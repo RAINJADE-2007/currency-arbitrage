@@ -1,0 +1,11 @@
+/build/
+/out/
+/arbitrage
+*.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+/.vs/
+/.vscode/
+/.idea/
