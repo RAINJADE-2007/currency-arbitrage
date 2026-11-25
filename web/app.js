@@ -3,7 +3,7 @@ import { createGraphView } from './graph-view.js';
 
 const byId = id => document.getElementById(id);
 const native = document.querySelector('meta[name="arbitrage-runtime"]').content === 'native';
-const view = createGraphView(byId('graph'), byId('graph-empty'));
+const view = createGraphView(byId('graph'), byId('graph-empty'), focusCurrency);
 const none = { currencies: [], edges: [] };
 const pageSize = 12;
 const draftKey = 'currency-arbitrage.custom-draft.v1';
@@ -22,6 +22,7 @@ const state = {
 };
 
 const examples = {
+    network_demo: '19 个币种、43 条单向兑换边的合成样例，用于查看区域内连接和跨区兑换路径。',
     profitable: '从 1 USD 出发，闭环换回 1.064 USD，预期收益 6.4%。',
     no_arbitrage: '闭环乘积为 0.931，预期不会报告盈利套汇。',
     break_even: '闭环乘积为 1，正好盈亏平衡。',
@@ -119,8 +120,23 @@ function fillCurrencies() {
             select.selectedIndex = 1;
         }
     }
+    const focus = byId('focus-currency');
+    focus.replaceChildren(new Option('全部币种', ''), ...names.map(name => new Option(name, name)));
+    focus.disabled = names.length === 0;
+    focusCurrency('');
     byId('rate-form').querySelector('button').disabled = names.length === 0;
     byId('remove-currency-button').disabled = names.length === 0;
+}
+
+function focusCurrency(name) {
+    byId('focus-currency').value = name;
+    view.focusCurrency(name);
+    const summary = byId('focus-summary');
+    summary.hidden = !name;
+    if (!name || !state.graph) return;
+    const outgoing = state.graph.edges.filter(edge => edge.from === name).length;
+    const incoming = state.graph.edges.filter(edge => edge.to === name).length;
+    summary.textContent = `${name} · 转出 ${outgoing} 条 · 转入 ${incoming} 条`;
 }
 
 function renderEdges() {
@@ -197,6 +213,7 @@ function changeDraft(source, sample = 'custom', allowInvalid = false, page = 0) 
     if (sample === 'custom' && graph) rememberCustom(source);
     byId('sample').value = sample;
     byId('sample-note').hidden = !examples[sample];
+    byId('sample-note-title').textContent = sample === 'network_demo' ? '大网示例' : '示例预期';
     byId('sample-expectation').textContent = examples[sample] ?? '';
     byId('draft').value = source;
     setDraftDirty(false);
@@ -348,6 +365,7 @@ byId('undo-removal').addEventListener('click', () => {
 byId('zoom-in').addEventListener('click', () => view.zoomBy(1.25));
 byId('zoom-out').addEventListener('click', () => view.zoomBy(.8));
 byId('zoom-reset').addEventListener('click', view.reset);
+byId('focus-currency').addEventListener('change', event => focusCurrency(event.target.value));
 byId('run-form').addEventListener('submit', event => {
     event.preventDefault();
     void runAction('analyze');
@@ -493,5 +511,5 @@ if (savedDraft === null) {
     fillCurrencies();
     refreshButtons();
     renderEdges();
-    void loadSample('profitable');
+    void loadSample('network_demo');
 }

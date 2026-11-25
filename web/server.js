@@ -16,8 +16,9 @@ const files = new Map([
     ['/app.js', ['web/app.js', 'text/javascript; charset=utf-8']],
     ['/draft.js', ['web/draft.js', 'text/javascript; charset=utf-8']],
     ['/graph-view.js', ['web/graph-view.js', 'text/javascript; charset=utf-8']],
+    ['/network-layout.js', ['web/network-layout.js', 'text/javascript; charset=utf-8']],
 ]);
-for (const sample of ['profitable', 'no_arbitrage', 'break_even', 'disconnected', 'near_threshold', 'invalid_rate']) {
+for (const sample of ['network_demo', 'profitable', 'no_arbitrage', 'break_even', 'disconnected', 'near_threshold', 'invalid_rate']) {
     files.set(`/data/${sample}.txt`, [`data/${sample}.txt`, 'text/plain; charset=utf-8']);
 }
 const actions = new Set(['parse', 'validate', 'weights', 'analyze']);

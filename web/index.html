@@ -17,7 +17,8 @@
         <span>套汇工作台</span>
       </a>
       <nav aria-label="页面导航">
-        <a href="#workspace">汇率图</a>
+        <a href="#network">汇率关系网</a>
+        <a href="#detection">检测</a>
         <a href="#editor">图数据</a>
       </nav>
       <span class="runtime-tag" id="runtime-tag">网页预览</span>
@@ -28,7 +29,7 @@
     <section class="intro" aria-labelledby="page-title">
       <div>
         <h1 id="page-title">套汇检测工作台</h1>
-        <p>用有向图观察币种与汇率，接入 Bellman–Ford 检测并复核兑换收益。</p>
+        <p>在汇率关系网中查看兑换方向，选择币种探索它的直接兑换路径。</p>
       </div>
       <div class="intro-actions">
         <button type="button" id="import-file-button">导入 TXT</button>
@@ -38,15 +39,16 @@
     </section>
 
     <div class="workspace-grid">
-      <section class="panel graph-panel" aria-labelledby="graph-title">
+      <section class="panel graph-panel" id="network" aria-labelledby="graph-title">
         <div class="panel-head graph-head">
           <div>
-            <h2 id="graph-title">有向汇率图</h2>
+            <h2 id="graph-title">汇率关系网</h2>
             <p id="graph-count">0 个币种 · 0 条兑换边</p>
           </div>
           <label class="field-inline" for="sample">
             <span>示例</span>
             <select id="sample">
+              <option value="network_demo">大网示例</option>
               <option value="profitable">题目盈利示例</option>
               <option value="no_arbitrage">有环但亏损</option>
               <option value="break_even">盈亏平衡</option>
@@ -59,24 +61,31 @@
         </div>
         <figure class="graph-figure">
           <div class="graph-viewport">
-            <canvas id="graph" role="img" aria-label="有向汇率图，详细方向和汇率见下方兑换边表"></canvas>
+            <canvas id="graph" role="img" aria-label="有向汇率关系网。可用下方的聚焦币种选择框查看连接，完整汇率见兑换边表。"></canvas>
             <div class="graph-empty" id="graph-empty" hidden>添加币种或导入草稿以查看有向图。</div>
             <div class="graph-controls" aria-label="图视图控制">
               <button id="zoom-out" type="button" aria-label="缩小">−</button>
               <button id="zoom-in" type="button" aria-label="放大">+</button>
-              <button id="zoom-reset" type="button">复位</button>
+              <button id="zoom-reset" type="button">适配画布</button>
             </div>
           </div>
           <figcaption>
-            <span><i class="legend-node" aria-hidden="true"></i>币种</span>
-            <span><i class="legend-edge" aria-hidden="true"></i>单向汇率</span>
-            <span><i class="legend-cycle" aria-hidden="true"></i>已复核的闭环</span>
-            <span class="graph-hint">可拖动图面</span>
+            <div class="graph-legend">
+              <span><i class="legend-node" aria-hidden="true"></i>币种</span>
+              <span><i class="legend-edge" aria-hidden="true"></i>兑换方向</span>
+              <span><i class="legend-cycle" aria-hidden="true"></i>已复核的闭环</span>
+              <span class="graph-hint">点击币种高亮 · 拖动调整位置</span>
+            </div>
+            <div class="graph-focus">
+              <label for="focus-currency">聚焦币种</label>
+              <select id="focus-currency"><option value="">全部币种</option></select>
+              <span id="focus-summary" role="status" hidden></span>
+            </div>
           </figcaption>
         </figure>
       </section>
 
-      <section class="panel run-panel" aria-labelledby="run-title">
+      <section class="panel run-panel" id="detection" aria-labelledby="run-title">
         <div class="panel-head">
           <div>
             <h2 id="run-title">检测与收益</h2>
@@ -84,25 +93,29 @@
           </div>
         </div>
         <div class="run-body">
-          <form id="run-form">
-            <label for="amount">初始金额</label>
-            <input id="amount" name="amount" inputmode="decimal" value="1" required>
-            <p class="field-note">以检测到的闭环起点币种计价。</p>
-            <button id="analyze" type="submit" class="primary full">运行检测</button>
-          </form>
-          <div class="run-secondary">
-            <button id="parse" type="button">解析 TXT</button>
-            <button id="validate" type="button">校验结构</button>
-            <button id="weights" type="button">查看权重</button>
+          <div class="run-inputs">
+            <form id="run-form">
+              <label for="amount">初始金额</label>
+              <input id="amount" name="amount" inputmode="decimal" value="1" required>
+              <p class="field-note">以检测到的闭环起点币种计价。</p>
+              <button id="analyze" type="submit" class="primary full">运行检测</button>
+            </form>
+            <div class="run-secondary">
+              <button id="parse" type="button">解析 TXT</button>
+              <button id="validate" type="button">校验结构</button>
+              <button id="weights" type="button">查看权重</button>
+            </div>
           </div>
-          <div class="run-result" id="run-result" role="status" aria-live="polite">
-            <strong>等待检测</strong>
-            <p>填好对应 C++ 模块后即可在此查看实际结果。</p>
+          <div>
+            <div class="run-result" id="run-result" role="status" aria-live="polite">
+              <strong>等待检测</strong>
+              <p>填好对应 C++ 模块后即可在此查看实际结果。</p>
+            </div>
+            <aside class="sample-note" id="sample-note" hidden>
+              <span id="sample-note-title">示例预期</span>
+              <p id="sample-expectation"></p>
+            </aside>
           </div>
-          <aside class="sample-note" id="sample-note">
-            <span>题目示例预期</span>
-            <p id="sample-expectation">从 1 USD 出发，闭环换回 1.064 USD，预期收益 6.4%。</p>
-          </aside>
         </div>
       </section>
     </div>
