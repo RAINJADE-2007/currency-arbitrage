@@ -6,6 +6,7 @@ const native = document.querySelector('meta[name="arbitrage-runtime"]').content 
 const view = createGraphView(byId('graph'), byId('graph-empty'));
 const none = { currencies: [], edges: [] };
 const pageSize = 12;
+const draftKey = 'currency-arbitrage.custom-draft.v1';
 const state = {
     graph: none,
     source: '0 0\n',
@@ -16,6 +17,8 @@ const state = {
     sourceRequest: 0,
     activeRequest: null,
     lastAction: null,
+    customSource: null,
+    removal: null,
 };
 
 const examples = {
@@ -85,9 +88,27 @@ function refreshButtons() {
     }
 }
 
+function rememberCustom(source) {
+    state.customSource = source;
+    try {
+        if (source === null) localStorage.removeItem(draftKey);
+        else localStorage.setItem(draftKey, source);
+    } catch {
+        // Keep the current draft in memory if browser storage is unavailable.
+    }
+}
+
+function clearParseResult() {
+    if (state.lastAction !== 'parse') return;
+    state.lastAction = null;
+    state.activeRequest = null;
+    blankResult();
+    refreshButtons();
+}
+
 function fillCurrencies() {
     const names = state.graph?.currencies ?? [];
-    for (const id of ['from', 'to']) {
+    for (const id of ['from', 'to', 'remove-currency']) {
         const select = byId(id);
         const current = select.value;
         select.replaceChildren(...names.map(name => new Option(name, name)));
@@ -99,6 +120,7 @@ function fillCurrencies() {
         }
     }
     byId('rate-form').querySelector('button').disabled = names.length === 0;
+    byId('remove-currency-button').disabled = names.length === 0;
 }
 
 function renderEdges() {
@@ -111,12 +133,34 @@ function renderEdges() {
         row.classList.toggle('is-cycle', state.cycle.includes(index));
         row.append(textElement('td', from), textElement('td', to), textElement('td', rate));
         if (state.weights) row.append(textElement('td', state.weights[index]));
+        const actions = document.createElement('td');
+        actions.className = 'edge-actions';
+        const edit = textElement('button', '修改');
+        const remove = textElement('button', '删除');
+        edit.setAttribute('aria-label', `修改 ${from} 到 ${to} 的汇率`);
+        remove.setAttribute('aria-label', `删除 ${from} 到 ${to} 的兑换边`);
+        edit.addEventListener('click', () => {
+            if (!requireAppliedDraft()) return;
+            byId('from').value = from;
+            byId('to').value = to;
+            byId('rate').value = rate;
+            byId('rate').focus();
+            byId('rate').select();
+        });
+        remove.addEventListener('click', () => {
+            if (!requireAppliedDraft()) return;
+            const remaining = edges.filter((_, edgeIndex) => edgeIndex !== index);
+            applyRemoval({ ...state.graph, edges: remaining }, `已删除 ${from} → ${to}。`);
+            byId('edges-title').focus();
+        });
+        actions.append(edit, remove);
+        row.append(actions);
         return row;
     });
     if (rows.length === 0) {
         const row = document.createElement('tr');
         const cell = textElement('td', '当前草稿没有可显示的兑换边。');
-        cell.colSpan = state.weights ? 4 : 3;
+        cell.colSpan = state.weights ? 5 : 4;
         row.append(cell);
         rows.push(row);
     }
@@ -130,7 +174,7 @@ function renderEdges() {
         : '从图草稿读取的单向汇率。';
 }
 
-function changeDraft(source, sample = 'custom', allowInvalid = false) {
+function changeDraft(source, sample = 'custom', allowInvalid = false, page = 0) {
     let graph = null;
     let previewError = '';
     try {
@@ -145,9 +189,12 @@ function changeDraft(source, sample = 'custom', allowInvalid = false) {
     state.sample = sample;
     state.weights = null;
     state.cycle = [];
-    state.page = 0;
+    state.page = Math.min(page, Math.max(0, Math.ceil((graph?.edges.length ?? 0) / pageSize) - 1));
     state.activeRequest = null;
     state.lastAction = null;
+    state.removal = null;
+    byId('undo-removal').hidden = true;
+    if (sample === 'custom' && graph) rememberCustom(source);
     byId('sample').value = sample;
     byId('sample-note').hidden = !examples[sample];
     byId('sample-expectation').textContent = examples[sample] ?? '';
@@ -164,10 +211,18 @@ function changeDraft(source, sample = 'custom', allowInvalid = false) {
     refreshButtons();
 }
 
+function applyRemoval(graph, message) {
+    const undo = { source: state.source, sample: state.sample, customSource: state.customSource, page: state.page };
+    changeDraft(serializeDraft(graph), 'custom', false, state.page);
+    state.removal = undo;
+    byId('undo-removal').hidden = false;
+    editorMessage(message);
+}
+
 async function loadSample(sample) {
     const request = ++state.sourceRequest;
     if (sample === 'custom') {
-        changeDraft(state.source, sample, true);
+        changeDraft(state.customSource ?? (state.graph ? state.source : '0 0\n'));
         return;
     }
     try {
@@ -280,7 +335,15 @@ byId('sample').addEventListener('change', event => {
     }
 });
 byId('clear-graph').addEventListener('click', () => {
-    if (requireAppliedDraft()) changeDraft('0 0\n');
+    if (requireAppliedDraft()) applyRemoval(none, '已新建空图。');
+});
+byId('undo-removal').addEventListener('click', () => {
+    if (!requireAppliedDraft() || !state.removal) return;
+    const { source, sample, customSource, page } = state.removal;
+    if (sample !== 'custom') rememberCustom(customSource);
+    changeDraft(source, sample, true, page);
+    byId('clear-graph').focus();
+    editorMessage('已恢复上一次删除或清空前的图。');
 });
 byId('zoom-in').addEventListener('click', () => view.zoomBy(1.25));
 byId('zoom-out').addEventListener('click', () => view.zoomBy(.8));
@@ -314,13 +377,9 @@ byId('draft').addEventListener('input', event => {
     state.sourceRequest += 1;
     byId('sample').value = state.sample;
     setDraftDirty(event.target.value !== state.source.replace(/\r\n?/gu, '\n'));
-    if (state.lastAction === 'parse') {
-        state.lastAction = null;
-        state.activeRequest = null;
-        blankResult();
-        refreshButtons();
-    }
+    clearParseResult();
 });
+
 byId('apply-draft').addEventListener('click', () => {
     try {
         changeDraft(byId('draft').value);
@@ -332,6 +391,7 @@ byId('apply-draft').addEventListener('click', () => {
 byId('discard-draft').addEventListener('click', () => {
     byId('draft').value = state.source;
     setDraftDirty(false);
+    clearParseResult();
     editorMessage('已恢复应用前的图文本。');
 });
 byId('currency-form').addEventListener('submit', event => {
@@ -353,6 +413,16 @@ byId('currency-form').addEventListener('submit', event => {
     } catch (error) {
         editorMessage(error.message, true);
     }
+});
+byId('remove-currency-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!requireAppliedDraft() || !state.graph) return;
+    const name = byId('remove-currency').value;
+    if (!state.graph.currencies.includes(name)) return;
+    const currencies = state.graph.currencies.filter(currency => currency !== name);
+    const edges = state.graph.edges.filter(edge => edge.from !== name && edge.to !== name);
+    const removedCount = state.graph.edges.length - edges.length;
+    applyRemoval({ currencies, edges }, `已删除 ${name} 及其关联的 ${removedCount} 条兑换边。`);
 });
 byId('rate-form').addEventListener('submit', event => {
     event.preventDefault();
@@ -408,5 +478,20 @@ byId('download').addEventListener('click', () => {
 });
 
 byId('runtime-tag').textContent = native ? '本地 C++ 接口' : '网页预览';
-changeDraft(state.source);
-void loadSample('profitable');
+let savedDraft = null;
+try {
+    savedDraft = localStorage.getItem(draftKey);
+    if (savedDraft !== null) changeDraft(savedDraft);
+} catch {
+    savedDraft = null;
+}
+if (savedDraft === null) {
+    byId('draft').value = state.source;
+    byId('sample-note').hidden = true;
+    view.setGraph(none);
+    blankResult();
+    fillCurrencies();
+    refreshButtons();
+    renderEdges();
+    void loadSample('profitable');
+}

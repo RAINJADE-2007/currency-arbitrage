@@ -111,9 +111,12 @@
       <div class="panel-head">
         <div>
           <h2 id="editor-title">编辑图数据</h2>
-          <p>草稿修改会立即更新汇率图。通过解析 TXT 可用 C++ 检查原始文本。</p>
+          <p>已应用的自定义草稿会保存在此浏览器。通过解析 TXT 可用 C++ 检查原始文本。</p>
         </div>
-        <button id="clear-graph" type="button">新建空图</button>
+        <div class="intro-actions">
+          <button id="clear-graph" type="button">新建空图</button>
+          <button id="undo-removal" type="button" hidden>撤销删除或清空</button>
+        </div>
       </div>
       <div class="editor-forms">
         <form id="currency-form">
@@ -132,6 +135,12 @@
           <button type="submit">设置汇率</button>
         </form>
       </div>
+      <form class="currency-tools" id="remove-currency-form">
+        <label for="remove-currency">待删除币种</label>
+        <select id="remove-currency" required aria-describedby="remove-currency-note"></select>
+        <button id="remove-currency-button" type="submit">删除币种</button>
+        <span id="remove-currency-note">关联兑换边会一并删除。</span>
+      </form>
       <details class="draft-details">
         <summary>查看或编辑图文本</summary>
         <label for="draft">首行是币种数和兑换边数，然后列出币种名，最后每行填写起点、终点和汇率。</label>
@@ -148,7 +157,7 @@
     <section class="panel table-panel" id="edges" aria-labelledby="edges-title">
       <div class="panel-head">
         <div>
-          <h2 id="edges-title">兑换边</h2>
+          <h2 id="edges-title" tabindex="-1">兑换边</h2>
           <p id="edges-caption">从图草稿读取的单向汇率。</p>
         </div>
         <div class="pagination" aria-label="兑换边分页">
@@ -159,7 +168,15 @@
       </div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th scope="col">起点</th><th scope="col">终点</th><th scope="col">汇率</th><th scope="col" id="weight-head" hidden>−ln(汇率)</th></tr></thead>
+          <thead>
+            <tr>
+              <th scope="col">起点</th>
+              <th scope="col">终点</th>
+              <th scope="col">汇率</th>
+              <th scope="col" id="weight-head" hidden>−ln(汇率)</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
           <tbody id="edge-rows"></tbody>
         </table>
       </div>
