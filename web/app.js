@@ -1,5 +1,6 @@
 import { isPositiveDecimal, maxDraftBytes, parseDraft, serializeDraft, serializeSnapshot } from './draft.js';
 import { createGraphView } from './graph-view.js';
+import { createReferenceFeed } from './reference-feed.js';
 
 const byId = id => document.getElementById(id);
 const native = document.querySelector('meta[name="arbitrage-runtime"]').content === 'native';
@@ -7,6 +8,7 @@ const view = createGraphView(byId('graph'), byId('graph-empty'), focusCurrency);
 const none = { currencies: [], edges: [] };
 const pageSize = 12;
 const draftKey = 'currency-arbitrage.custom-draft.v1';
+const referenceMode = 'reference_rates';
 const state = {
     graph: none,
     source: '0 0\n',
@@ -19,7 +21,25 @@ const state = {
     lastAction: null,
     customSource: null,
     removal: null,
+    referenceSnapshot: null,
 };
+
+const referenceFeed = createReferenceFeed({
+    onChecking() {
+        byId('reference-refresh').disabled = true;
+        if (!state.referenceSnapshot) setReferenceStatus('loading', '正在获取汇率');
+    },
+    onSnapshot: applyReferenceSnapshot,
+    onFailure() {
+        byId('reference-refresh').disabled = false;
+        if (state.referenceSnapshot) {
+            setReferenceStatus('stale', '连接失败 · 显示上次数据');
+        } else {
+            setReferenceStatus('error', '暂时无法获取汇率');
+            view.setGraph(none, '暂时无法获取汇率，可点击检查更新重试。');
+        }
+    },
+});
 
 const examples = {
     network_demo: '19 个币种、43 条单向兑换边的合成样例，用于查看区域内连接和跨区兑换路径。',
@@ -107,6 +127,61 @@ function clearParseResult() {
     refreshButtons();
 }
 
+function isReferenceMode() {
+    return state.sample === referenceMode;
+}
+
+function setReferenceStatus(tone, message) {
+    const element = byId('reference-status');
+    element.dataset.tone = tone;
+    if (element.textContent !== message) element.textContent = message;
+}
+
+function showReferenceMode(active) {
+    for (const id of ['reference-bar', 'reference-legend']) byId(id).hidden = !active;
+    for (const id of ['detection', 'detection-link', 'editor', 'editor-link', 'import-file-button', 'edge-action-head', 'cycle-legend']) {
+        byId(id).hidden = active;
+    }
+    byId('download').textContent = active ? '下载汇率快照' : '下载草稿';
+    byId('download').disabled = active && !state.referenceSnapshot;
+    if (active) {
+        for (const id of ['reference-date', 'reference-sync']) {
+            byId(id).textContent = '—';
+            byId(id).removeAttribute('datetime');
+        }
+    }
+}
+
+function applyReferenceSnapshot(snapshot) {
+    const source = serializeDraft(snapshot.graph);
+    const first = state.referenceSnapshot === null;
+    if (first || source !== state.source) {
+        const graph = parseDraft(source);
+        state.graph = graph;
+        state.source = source;
+        if (first) {
+            view.setGraph(graph);
+            fillCurrencies();
+        } else {
+            view.updateRates(graph);
+        }
+        byId('graph-count').textContent = `${graph.currencies.length} 个币种 · ${graph.edges.length} 条兑换边`;
+        renderEdges();
+    }
+    state.referenceSnapshot = snapshot;
+    const date = byId('reference-date');
+    date.dateTime = date.textContent = snapshot.date;
+    const syncTime = byId('reference-sync');
+    syncTime.dateTime = snapshot.fetchedAt;
+    syncTime.textContent = new Intl.DateTimeFormat('zh-CN', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Shanghai',
+    }).format(new Date(snapshot.fetchedAt));
+    if (snapshot.stale) setReferenceStatus('stale', '同步失败 · 显示上次数据');
+    else setReferenceStatus('ready', '已同步');
+    byId('reference-refresh').disabled = false;
+    byId('download').disabled = false;
+}
+
 function fillCurrencies() {
     const names = state.graph?.currencies ?? [];
     for (const id of ['from', 'to', 'remove-currency']) {
@@ -141,6 +216,7 @@ function focusCurrency(name) {
 
 function renderEdges() {
     const edges = state.graph?.edges ?? [];
+    const readOnly = isReferenceMode();
     const total = Math.max(1, Math.ceil(edges.length / pageSize));
     const start = state.page * pageSize;
     const rows = edges.slice(start, start + pageSize).map(({ from, to, rate }, pageIndex) => {
@@ -149,6 +225,7 @@ function renderEdges() {
         row.classList.toggle('is-cycle', state.cycle.includes(index));
         row.append(textElement('td', from), textElement('td', to), textElement('td', rate));
         if (state.weights) row.append(textElement('td', state.weights[index]));
+        if (readOnly) return row;
         const actions = document.createElement('td');
         actions.className = 'edge-actions';
         const edit = textElement('button', '修改');
@@ -175,8 +252,8 @@ function renderEdges() {
     });
     if (rows.length === 0) {
         const row = document.createElement('tr');
-        const cell = textElement('td', '当前草稿没有可显示的兑换边。');
-        cell.colSpan = state.weights ? 5 : 4;
+        const cell = textElement('td', readOnly ? '等待联网汇率。' : '当前草稿没有可显示的兑换边。');
+        cell.colSpan = 3 + Number(Boolean(state.weights)) + Number(!readOnly);
         row.append(cell);
         rows.push(row);
     }
@@ -185,7 +262,7 @@ function renderEdges() {
     byId('previous').disabled = state.page === 0;
     byId('next').disabled = state.page + 1 >= total;
     byId('weight-head').hidden = !state.weights;
-    byId('edges-caption').textContent = state.weights
+    byId('edges-caption').textContent = readOnly ? '同日参考汇率折算出的单向兑换比率。' : state.weights
         ? '负对数权重来自 C++ 模块 B1。'
         : '从图草稿读取的单向汇率。';
 }
@@ -209,6 +286,10 @@ function changeDraft(source, sample = 'custom', allowInvalid = false, page = 0) 
     state.activeRequest = null;
     state.lastAction = null;
     state.removal = null;
+    state.referenceSnapshot = null;
+    if (!isReferenceMode()) referenceFeed.stop();
+    showReferenceMode(isReferenceMode());
+    byId('source-error').hidden = true;
     byId('undo-removal').hidden = true;
     if (sample === 'custom' && graph) rememberCustom(source);
     byId('sample').value = sample;
@@ -238,8 +319,15 @@ function applyRemoval(graph, message) {
 
 async function loadSample(sample) {
     const request = ++state.sourceRequest;
+    if (sample === referenceMode && native) {
+        if (isReferenceMode()) return;
+        changeDraft('0 0\n', referenceMode);
+        view.setGraph(none, '正在获取联网汇率…');
+        referenceFeed.start();
+        return;
+    }
     if (sample === 'custom') {
-        changeDraft(state.customSource ?? (state.graph ? state.source : '0 0\n'));
+        changeDraft(state.customSource ?? (!isReferenceMode() && state.graph ? state.source : '0 0\n'));
         return;
     }
     try {
@@ -250,7 +338,9 @@ async function loadSample(sample) {
     } catch (error) {
         if (request === state.sourceRequest) {
             byId('sample').value = state.sample;
-            editorMessage(error.message, true);
+            const sourceError = byId('source-error');
+            sourceError.textContent = error.message;
+            sourceError.hidden = false;
         }
     }
 }
@@ -280,7 +370,7 @@ function showAnalysis(reply) {
 }
 
 async function runAction(action) {
-    if (!native || state.activeRequest !== null) return;
+    if (!native || isReferenceMode() || state.activeRequest !== null) return;
     if (action !== 'parse' && !byId('draft-dirty').hidden) {
         runResult('请先应用图文本', '草稿编辑器里有尚未应用的修改。', 'warning');
         return;
@@ -366,6 +456,7 @@ byId('zoom-in').addEventListener('click', () => view.zoomBy(1.25));
 byId('zoom-out').addEventListener('click', () => view.zoomBy(.8));
 byId('zoom-reset').addEventListener('click', view.reset);
 byId('focus-currency').addEventListener('change', event => focusCurrency(event.target.value));
+byId('reference-refresh').addEventListener('click', () => void referenceFeed.refresh());
 byId('run-form').addEventListener('submit', event => {
     event.preventDefault();
     void runAction('analyze');
@@ -482,6 +573,7 @@ byId('import-file').addEventListener('change', async event => {
     }
 });
 byId('download').addEventListener('click', () => {
+    if (isReferenceMode() && !state.referenceSnapshot) return;
     if (!byId('draft-dirty').hidden) {
         editorMessage('请先应用图文本，再下载草稿。', true);
         return;
@@ -490,12 +582,14 @@ byId('download').addEventListener('click', () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'exchange-graph.txt';
+    link.download = isReferenceMode() ? `reference-rates-${state.referenceSnapshot.date}.txt` : 'exchange-graph.txt';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
 byId('runtime-tag').textContent = native ? '本地 C++ 接口' : '网页预览';
+byId('reference-option').hidden = !native;
+byId('reference-option').disabled = !native;
 let savedDraft = null;
 try {
     savedDraft = localStorage.getItem(draftKey);
@@ -503,7 +597,9 @@ try {
 } catch {
     savedDraft = null;
 }
-if (savedDraft === null) {
+if (native && new URLSearchParams(window.location.search).get('rates') === 'online') {
+    void loadSample(referenceMode);
+} else if (savedDraft === null) {
     byId('draft').value = state.source;
     byId('sample-note').hidden = true;
     view.setGraph(none);

@@ -5,10 +5,14 @@ const colors = {
     outgoing: '#68e6e1',
     incoming: '#b4c4ff',
     profit: '#92efa9',
+    rateUp: '#ffb386',
+    rateDown: '#91cfff',
     node: '#143a4d',
     border: '#80e3e2',
     label: '#e8f7ff',
 };
+
+const rateHighlightMs = 2200;
 
 function pointToward(from, to, distance) {
     const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
@@ -54,6 +58,8 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
     let links = [];
     let degree = [];
     let cycle = new Set();
+    let rateChanges = new Map();
+    let rateTimer = null;
     let focused = '';
     let hovered = -1;
     let placement = null;
@@ -82,7 +88,7 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
         return placement;
     }
 
-    function drawLink(link, color, emphasis, label) {
+    function drawLink(link, color, emphasis, label, direction = 0) {
         const { points, radii } = placement;
         const { fromIndex, toIndex, paired, rate } = link;
         const from = points[fromIndex];
@@ -90,7 +96,7 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
         const fromRadius = radii[fromIndex];
         const toRadius = radii[toIndex];
         context.strokeStyle = context.fillStyle = color;
-        context.lineWidth = emphasis ? 2.25 : 1.25;
+        context.lineWidth = direction ? 3.2 : emphasis ? 2.25 : 1.25;
         context.beginPath();
         let labelPoint;
         if (fromIndex === toIndex) {
@@ -121,7 +127,8 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
             labelPoint = { x: .25 * start.x + .5 * control.x + .25 * end.x,
                 y: .25 * start.y + .5 * control.y + .25 * end.y };
         }
-        return label ? [rate, labelPoint.x, labelPoint.y, color] : null;
+        const marker = direction > 0 ? '↑ ' : direction < 0 ? '↓ ' : '';
+        return label ? [marker + rate, labelPoint.x, labelPoint.y, color] : null;
     }
 
     function draw() {
@@ -140,6 +147,7 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
         const profitableNodes = new Set();
         const focusedLinks = [];
         const profitableLinks = [];
+        const changedLinks = [];
         const baseLabels = [];
         const showBaseRates = !focused && (links.length <= 12 || (links.length <= 50 && scale > 1.65));
         links.forEach((link, index) => {
@@ -148,7 +156,10 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
                 relatedNodes.add(link.fromIndex);
                 relatedNodes.add(link.toIndex);
             }
-            if (cycle.has(index)) {
+            const direction = rateChanges.get(index);
+            if (direction) {
+                changedLinks.push({ link, direction });
+            } else if (cycle.has(index)) {
                 profitableNodes.add(link.fromIndex);
                 profitableNodes.add(link.toIndex);
                 profitableLinks.push(link);
@@ -164,8 +175,10 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
         const focusLabels = focusedLinks.map((link, index) =>
             drawLink(link, link.from === focused ? colors.outgoing : colors.incoming, true, index < 16));
         const profitLabels = profitableLinks.map((link, index) => drawLink(link, colors.profit, true, index < 16));
+        const changeLabels = changedLinks.map(({ link, direction }) =>
+            drawLink(link, direction > 0 ? colors.rateUp : colors.rateDown, true, true, direction));
         const occupied = [];
-        for (const label of [...profitLabels, ...focusLabels, ...baseLabels]) {
+        for (const label of [...changeLabels, ...profitLabels, ...focusLabels, ...baseLabels]) {
             if (label) drawRate(context, ...label, occupied);
         }
 
@@ -206,6 +219,12 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
         if (pending) return;
         pending = true;
         requestAnimationFrame(draw);
+    }
+
+    function clearRateChanges() {
+        clearTimeout(rateTimer);
+        rateTimer = null;
+        rateChanges.clear();
     }
 
     function reset() {
@@ -301,27 +320,67 @@ export function createGraphView(canvas, empty, onFocus = () => {}) {
         redraw();
     }, { passive: false });
 
+    function setGraph(next, error) {
+        graph = next ?? emptyGraph;
+        clearRateChanges();
+        cycle = new Set();
+        focused = '';
+        pointer = null;
+        canvas.classList.remove('is-dragging');
+        const indices = new Map(graph.currencies.map((name, index) => [name, index]));
+        const pairs = new Set(graph.edges.map(edge => `${edge.from} ${edge.to}`));
+        degree = graph.currencies.map(() => 0);
+        links = graph.edges.map(edge => {
+            const fromIndex = indices.get(edge.from);
+            const toIndex = indices.get(edge.to);
+            degree[fromIndex] += 1;
+            degree[toIndex] += 1;
+            return { ...edge, fromIndex, toIndex, paired: pairs.has(`${edge.to} ${edge.from}`) };
+        });
+        empty.hidden = graph.currencies.length > 0;
+        empty.textContent = error || '添加币种或导入草稿以查看有向图。';
+        reset();
+    }
+
+    function updateRates(nextGraph) {
+        // Quote snapshots keep the currency order and directed edge indices stable.
+        const sameTopology = nextGraph && graph.currencies.length === nextGraph.currencies.length
+            && graph.currencies.every((name, index) => name === nextGraph.currencies[index])
+            && links.length === nextGraph.edges.length
+            && links.every(({ from, to }, index) =>
+                from === nextGraph.edges[index].from && to === nextGraph.edges[index].to);
+        if (!sameTopology) {
+            setGraph(nextGraph);
+            return 0;
+        }
+
+        const changes = new Map();
+        let newLabel = false;
+        links.forEach((link, index) => {
+            const { rate } = nextGraph.edges[index];
+            if (link.rate === rate) return;
+            const direction = Math.sign(Number(rate) - Number(link.rate));
+            if (direction) changes.set(index, direction);
+            link.rate = rate;
+            newLabel = true;
+        });
+        graph = nextGraph;
+        if (changes.size) {
+            cycle.clear();
+            clearRateChanges();
+            rateChanges = changes;
+            rateTimer = setTimeout(() => {
+                clearRateChanges();
+                redraw();
+            }, rateHighlightMs);
+        }
+        if (newLabel) redraw();
+        return changes.size;
+    }
+
     return {
-        setGraph(next, error) {
-            graph = next ?? emptyGraph;
-            cycle = new Set();
-            focused = '';
-            pointer = null;
-            canvas.classList.remove('is-dragging');
-            const indices = new Map(graph.currencies.map((name, index) => [name, index]));
-            const pairs = new Set(graph.edges.map(edge => `${edge.from} ${edge.to}`));
-            degree = graph.currencies.map(() => 0);
-            links = graph.edges.map(edge => {
-                const fromIndex = indices.get(edge.from);
-                const toIndex = indices.get(edge.to);
-                degree[fromIndex] += 1;
-                degree[toIndex] += 1;
-                return { ...edge, fromIndex, toIndex, paired: pairs.has(`${edge.to} ${edge.from}`) };
-            });
-            empty.hidden = graph.currencies.length > 0;
-            empty.textContent = error || '添加币种或导入草稿以查看有向图。';
-            reset();
-        },
+        setGraph,
+        updateRates,
         setCycle(edgeIds) {
             cycle = new Set(edgeIds);
             redraw();

@@ -18,8 +18,8 @@
       </a>
       <nav aria-label="页面导航">
         <a href="#network">汇率关系网</a>
-        <a href="#detection">检测</a>
-        <a href="#editor">图数据</a>
+        <a href="#detection" id="detection-link">检测</a>
+        <a href="#editor" id="editor-link">图数据</a>
       </nav>
       <span class="runtime-tag" id="runtime-tag">网页预览</span>
     </div>
@@ -46,9 +46,10 @@
             <p id="graph-count">0 个币种 · 0 条兑换边</p>
           </div>
           <label class="field-inline" for="sample">
-            <span>示例</span>
+            <span>数据来源</span>
             <select id="sample">
-              <option value="network_demo">大网示例</option>
+              <option value="reference_rates" id="reference-option">联网参考汇率</option>
+              <option value="network_demo" selected>大网示例</option>
               <option value="profitable">题目盈利示例</option>
               <option value="no_arbitrage">有环但亏损</option>
               <option value="break_even">盈亏平衡</option>
@@ -58,6 +59,17 @@
               <option value="custom">自定义草稿</option>
             </select>
           </label>
+        </div>
+        <p class="source-error" id="source-error" role="status" hidden></p>
+        <div class="reference-bar" id="reference-bar" hidden>
+          <div class="reference-meta">
+            <span id="reference-status" class="reference-status" role="status">等待同步</span>
+            <span><a href="https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html" target="_blank" rel="noopener">欧洲央行参考汇率</a></span>
+            <span>数据日期 <time id="reference-date">—</time></span>
+            <span>上次同步（北京时间） <time id="reference-sync">—</time></span>
+          </div>
+          <button id="reference-refresh" type="button">检查更新</button>
+          <p class="reference-note">每分钟检查一次 · 数据随欧洲央行的工作日发布更新 · 交叉汇率由同日数据折算</p>
         </div>
         <figure class="graph-figure">
           <div class="graph-viewport">
@@ -73,7 +85,8 @@
             <div class="graph-legend">
               <span><i class="legend-node" aria-hidden="true"></i>币种</span>
               <span><i class="legend-edge" aria-hidden="true"></i>兑换方向</span>
-              <span><i class="legend-cycle" aria-hidden="true"></i>已复核的闭环</span>
+              <span id="cycle-legend"><i class="legend-cycle" aria-hidden="true"></i>已复核的闭环</span>
+              <span id="reference-legend" hidden><i class="legend-rate-up" aria-hidden="true"></i>汇率上升 <i class="legend-rate-down" aria-hidden="true"></i>汇率下降</span>
               <span class="graph-hint">点击币种高亮 · 拖动调整位置</span>
             </div>
             <div class="graph-focus">
@@ -187,7 +200,7 @@
               <th scope="col">终点</th>
               <th scope="col">汇率</th>
               <th scope="col" id="weight-head" hidden>−ln(汇率)</th>
-              <th scope="col">操作</th>
+              <th scope="col" id="edge-action-head">操作</th>
             </tr>
           </thead>
           <tbody id="edge-rows"></tbody>

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { createReferenceRates } from './reference-rates.js';
 
 const port = Number(process.env.PORT ?? 4173);
 const project = new URL('../', import.meta.url);
@@ -17,12 +18,14 @@ const files = new Map([
     ['/draft.js', ['web/draft.js', 'text/javascript; charset=utf-8']],
     ['/graph-view.js', ['web/graph-view.js', 'text/javascript; charset=utf-8']],
     ['/network-layout.js', ['web/network-layout.js', 'text/javascript; charset=utf-8']],
+    ['/reference-feed.js', ['web/reference-feed.js', 'text/javascript; charset=utf-8']],
 ]);
 for (const sample of ['network_demo', 'profitable', 'no_arbitrage', 'break_even', 'disconnected', 'near_threshold', 'invalid_rate']) {
     files.set(`/data/${sample}.txt`, [`data/${sample}.txt`, 'text/plain; charset=utf-8']);
 }
 const actions = new Set(['parse', 'validate', 'weights', 'analyze']);
 const inputLimit = 2 * 1024 * 1024;
+const getReferenceRates = createReferenceRates();
 
 function send(response, code, type, body) {
     response.writeHead(code, {
@@ -91,6 +94,11 @@ async function handle(request, response) {
         return;
     }
     const url = new URL(request.url, `http://${host}`);
+    if (request.method === 'GET' && url.pathname === '/api/reference-rates') {
+        const rates = await getReferenceRates();
+        sendJson(response, rates.status === 'Ok' ? 200 : 503, rates);
+        return;
+    }
     const file = files.get(url.pathname);
     if (request.method === 'GET' && file) {
         const content = await readFile(new URL(file[0], project), 'utf8');
