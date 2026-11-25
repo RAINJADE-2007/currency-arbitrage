@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="arbitrage-runtime" content="static">
+  <meta name="description" content="编辑并可视化有向汇率图，连接 C++ 套汇检测框架。">
+  <title>套汇检测工作台</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-row">
+      <a class="brand" href="./">
+        <span class="brand-mark" aria-hidden="true">↻</span>
+        <span>套汇工作台</span>
+      </a>
+      <nav aria-label="页面导航">
+        <a href="#workspace">汇率图</a>
+        <a href="#editor">图数据</a>
+      </nav>
+      <span class="runtime-tag" id="runtime-tag">网页预览</span>
+    </div>
+  </header>
+
+  <main class="shell" id="workspace">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <h1 id="page-title">套汇检测工作台</h1>
+        <p>用有向图观察币种与汇率，接入 Bellman–Ford 检测并复核兑换收益。</p>
+      </div>
+      <div class="intro-actions">
+        <button type="button" id="import-file-button">导入 TXT</button>
+        <input type="file" id="import-file" accept=".txt,text/plain" hidden>
+        <button type="button" id="download">下载草稿</button>
+      </div>
+    </section>
+
+    <div class="workspace-grid">
+      <section class="panel graph-panel" aria-labelledby="graph-title">
+        <div class="panel-head graph-head">
+          <div>
+            <h2 id="graph-title">有向汇率图</h2>
+            <p id="graph-count">0 个币种 · 0 条兑换边</p>
+          </div>
+          <label class="field-inline" for="sample">
+            <span>示例</span>
+            <select id="sample">
+              <option value="profitable">题目盈利示例</option>
+              <option value="no_arbitrage">有环但亏损</option>
+              <option value="break_even">盈亏平衡</option>
+              <option value="disconnected">不连通图</option>
+              <option value="near_threshold">接近收益阈值</option>
+              <option value="invalid_rate">非法汇率</option>
+              <option value="custom">自定义草稿</option>
+            </select>
+          </label>
+        </div>
+        <figure class="graph-figure">
+          <div class="graph-viewport">
+            <canvas id="graph" role="img" aria-label="有向汇率图，详细方向和汇率见下方兑换边表"></canvas>
+            <div class="graph-empty" id="graph-empty" hidden>添加币种或导入草稿以查看有向图。</div>
+            <div class="graph-controls" aria-label="图视图控制">
+              <button id="zoom-out" type="button" aria-label="缩小">−</button>
+              <button id="zoom-in" type="button" aria-label="放大">+</button>
+              <button id="zoom-reset" type="button">复位</button>
+            </div>
+          </div>
+          <figcaption>
+            <span><i class="legend-node" aria-hidden="true"></i>币种</span>
+            <span><i class="legend-edge" aria-hidden="true"></i>单向汇率</span>
+            <span><i class="legend-cycle" aria-hidden="true"></i>已复核的闭环</span>
+            <span class="graph-hint">可拖动图面</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="panel run-panel" aria-labelledby="run-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="run-title">检测与收益</h2>
+            <p>C++ 模块联调</p>
+          </div>
+        </div>
+        <div class="run-body">
+          <form id="run-form">
+            <label for="amount">初始金额</label>
+            <input id="amount" name="amount" inputmode="decimal" value="1" required>
+            <p class="field-note">以检测到的闭环起点币种计价。</p>
+            <button id="analyze" type="submit" class="primary full">运行检测</button>
+          </form>
+          <div class="run-secondary">
+            <button id="parse" type="button">解析 TXT</button>
+            <button id="validate" type="button">校验结构</button>
+            <button id="weights" type="button">查看权重</button>
+          </div>
+          <div class="run-result" id="run-result" role="status" aria-live="polite">
+            <strong>等待检测</strong>
+            <p>填好对应 C++ 模块后即可在此查看实际结果。</p>
+          </div>
+          <aside class="sample-note" id="sample-note">
+            <span>题目示例预期</span>
+            <p id="sample-expectation">从 1 USD 出发，闭环换回 1.064 USD，预期收益 6.4%。</p>
+          </aside>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel editor-panel" id="editor" aria-labelledby="editor-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="editor-title">编辑图数据</h2>
+          <p>草稿修改会立即更新汇率图。通过解析 TXT 可用 C++ 检查原始文本。</p>
+        </div>
+        <button id="clear-graph" type="button">新建空图</button>
+      </div>
+      <div class="editor-forms">
+        <form id="currency-form">
+          <label for="currency">币种名称</label>
+          <div class="form-row">
+            <input id="currency" required placeholder="如 JPY" autocomplete="off">
+            <button type="submit">添加币种</button>
+          </div>
+        </form>
+        <form id="rate-form">
+          <div class="rate-inputs">
+            <label for="from">起点币种<select id="from" required></select></label>
+            <label for="to">终点币种<select id="to" required></select></label>
+            <label for="rate">汇率<input id="rate" required inputmode="decimal" placeholder="如 0.7"></label>
+          </div>
+          <button type="submit">设置汇率</button>
+        </form>
+      </div>
+      <details class="draft-details">
+        <summary>查看或编辑图文本</summary>
+        <label for="draft">首行是币种数和兑换边数，然后列出币种名，最后每行填写起点、终点和汇率。</label>
+        <textarea id="draft" spellcheck="false" rows="7"></textarea>
+        <div class="draft-actions">
+          <button id="apply-draft" type="button">应用文本</button>
+          <button id="discard-draft" type="button" hidden>撤销文本修改</button>
+          <span id="draft-dirty" hidden>文本有未应用的修改</span>
+        </div>
+      </details>
+      <p class="editor-message" id="editor-message" role="status"></p>
+    </section>
+
+    <section class="panel table-panel" id="edges" aria-labelledby="edges-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="edges-title">兑换边</h2>
+          <p id="edges-caption">从图草稿读取的单向汇率。</p>
+        </div>
+        <div class="pagination" aria-label="兑换边分页">
+          <button id="previous" type="button" aria-label="上一页">‹</button>
+          <span id="page-count">1 / 1</span>
+          <button id="next" type="button" aria-label="下一页">›</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th scope="col">起点</th><th scope="col">终点</th><th scope="col">汇率</th><th scope="col" id="weight-head" hidden>−ln(汇率)</th></tr></thead>
+          <tbody id="edge-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

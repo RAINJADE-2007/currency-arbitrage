@@ -1,0 +1,12 @@
+{
+  "name": "currency-arbitrage-workbench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node web/build.js",
+    "start": "node web/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
